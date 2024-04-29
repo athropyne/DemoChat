@@ -1,0 +1,7 @@
+websockets
+pydantic
+passlib[bcrypt]
+sqlalchemy
+redis
+aiosqlite
+python-dotenv
