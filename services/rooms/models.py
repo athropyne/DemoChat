@@ -1,8 +1,9 @@
-from typing import Union, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from services.rooms.aliases import RoomAliases
+from services.accounts.aliases import AccountAliases
+from services.rooms.aliases import RoomAliases, LocalRanks, LocalRankAliases
 
 
 class CreateRoomModel(BaseModel):
@@ -12,3 +13,23 @@ class CreateRoomModel(BaseModel):
 class LocationShortInfoModel(BaseModel):
     id: Optional[int] = Field(alias=RoomAliases.ID)
     title: Optional[str] = Field(alias=RoomAliases.title)
+
+
+class AddLocalPermissionModel(BaseModel):
+    target_user_id: int = Field(alias=AccountAliases.ID)
+    rank: Optional[LocalRanks] = Field(alias=LocalRankAliases.rank)
+
+
+class RemoveLocalPermissionModel(BaseModel):
+    target_user_id: int = Field(alias=AccountAliases.ID)
+
+
+local_permission_level = {
+    LocalRanks.BANNED: 0,
+    None: 1,
+    LocalRanks.MODERATOR: 2,
+    LocalRanks.OWNER: 3,
+}
+
+
+

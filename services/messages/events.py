@@ -5,20 +5,24 @@ from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.io import output
+from core.io import output, InternalError
 from core.schemas import public
+from core.security import protected
 from core.user_cash import User, Cash
 from services.accounts.aliases import AccountAliases
 from services.messages.aliases import PublicAliases
 from services.messages.models import NewPublicModel, PublicMessageOut, Author
-from services.rooms.aliases import LocalRankAliases
+from services.rooms.aliases import LocalRankAliases, LocalRanks
 
 
 class SendPublic(BaseEvent):
 
+    @protected
     # @permission(Ranks.USER, update_cash=False)
     async def __call__(self, socket: WebSocketServerProtocol, model: NewPublicModel, token: str):
         user: User = Cash.online[socket.id]
+        if user.local_rank is LocalRanks.BANNED:
+            raise InternalError("операция недоступна", "вы в бане. парьтесь :)")
         data = {
             PublicAliases.creator: user.user_id,
             PublicAliases.room: user.location_id,

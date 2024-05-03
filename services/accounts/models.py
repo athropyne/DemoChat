@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Union
 
-
 from pydantic import BaseModel, Field
 
 from services.accounts.aliases import AccountAliases, AccountStatuses
@@ -45,7 +44,7 @@ class Error:
     USER_NOT_FOUND = "пользователь не найден"
 
 
-class GetUserListModel(Paginator):
+class GetOnlineUserListModel(Paginator):
     location_id: Optional[int] = Field(None, alias=RoomAliases.ID)
     location_name: Optional[str] = Field(None, alias=RoomAliases.title, max_length=24)
 
@@ -58,9 +57,12 @@ class GetUserListOut(BaseModel):
 
 
 class ChangeNickModel(BaseModel):
-    ID: int = Field(alias=AccountAliases.ID)
     nickname: str = Field(alias=AccountAliases.nickname)
 
 
+class ChangePasswordModel(BaseModel):
+    password: str = Field(alias=AccountAliases.password)
+
+
 class RelocationModel(BaseModel):
-    room_id:int = Field(alias=RoomAliases.ID)
+    room_id: int = Field(alias=RoomAliases.ID)

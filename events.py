@@ -1,14 +1,15 @@
-from services.accounts.events import Create, Auth, GetOneUser, GetUserList, ChangeNick, Relocation
+from services.accounts.events import Create, Auth, GetOneUser, GetOnlineUserList, ChangeNick, Relocation
 from services.messages.events import SendPublic
-from services.rooms.events import CreateRoom
+from services.rooms.events import CreateRoom, UpdatePermission
 
 events = [
     Create("зарегистрироваться"),
     Auth("залогиниться"),
     GetOneUser("получить пользователя"),
-    GetUserList("получить список пользователей"),
+    GetOnlineUserList("получить список пользователей"),
     ChangeNick("изменить ник"),
     Relocation("войти в комнату"),
     CreateRoom("создать комнату"),
-    SendPublic("написать в комнату")
+    SendPublic("написать в комнату"),
+    UpdatePermission("изменить привелегии")
 ]

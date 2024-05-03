@@ -1,7 +1,9 @@
-from typing import Optional
+from typing import Optional, Type
 
+from pydantic import BaseModel
 from sqlalchemy import CursorResult, insert, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection
 from websockets import WebSocketServerProtocol
 
 from core import User
@@ -10,10 +12,11 @@ from core.database import engine
 from core.io import InternalError, output
 from core.managers import Token, PasswordManager
 from core.schemas import accounts, locations, local_ranks, rooms
+from core.security import protected
 from core.user_cash import Cash
 from services.accounts.aliases import AccountAliases, AccountStatuses
-from services.accounts.models import CreateModel, AuthModel, GetOneUserOut, GetOneUserModel, GetUserListModel, \
-    ChangeNickModel, RelocationModel
+from services.accounts.models import CreateModel, AuthModel, GetOneUserOut, GetOneUserModel, GetOnlineUserListModel, \
+    ChangeNickModel, RelocationModel, ChangePasswordModel
 from services.messages.aliases import PublicAliases
 from services.messages.events import SendPublic
 from services.messages.models import NewPublicModel
@@ -106,7 +109,7 @@ class GetOneUser(BaseEvent):
     def __init__(self, name: str):
         super().__init__(name)
 
-    # @permission(Ranks.USER, update_cash=False)
+    @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: GetOneUserModel, token: str):
         async with engine.connect() as connection:
             cursor: CursorResult = await connection.execute(
@@ -139,134 +142,85 @@ class GetOneUser(BaseEvent):
                     ).model_dump(by_alias=True),
                 }
             )
-            await socket.send(output("информация о пользователе", GetOneUserOut(**mess_out.model_dump(by_alias=True)).model_dump(by_alias=True)))
+            await socket.send(output("информация о пользователе",
+                                     GetOneUserOut(**mess_out.model_dump(by_alias=True)).model_dump(by_alias=True)))
 
 
-class GetUserList(BaseEvent):
+class GetOnlineUserList(BaseEvent):
     def __init__(self, name: str):
         super().__init__(name)
 
-    # @permission(Ranks.USER, update_cash=False)
-    async def __sql__call__(self, socket: WebSocketServerProtocol, model: GetUserListModel, token: str):
-        stmt = select(
-            accounts.c[AccountAliases.ID],
-            accounts.c[AccountAliases.nickname],
-            locations.c[RoomAliases.ID],
-            rooms.c[RoomAliases.title]
-        ) \
-            .select_from(accounts) \
-            .join(locations, accounts.c[AccountAliases.ID] == locations.c[AccountAliases.ID], isouter=True) \
-            .join(rooms, isouter=True)
-
-        if model.gender:
-            stmt = stmt.where(accounts.c[AccountAliases.gender] == model.gender)
-        if model.rank:
-            stmt = stmt.where(accounts.c[AccountAliases.rank] == model.rank)
-        if model.residence_place:
-            stmt = stmt.where(accounts.c[AccountAliases.residence_place] == model.residence_place)
-        if model.location_name:
-            stmt = stmt.where(locations.c[RoomAliases.title] == model.location_name)
-
-        async with engine.connect() as db:
-            cursor: CursorResult = await db.execute(
-                stmt
-                .where()
-                .offset(model.skip)
-                .limit(model.limit)
-            )
-
-            result = cursor.mappings().fetchall()
-            output = [dict(i) for i in result]
-            await socket.send(Response(data=output))
-
-    async def __call__(self, socket: WebSocketServerProtocol, model: GetUserListModel, token: str):
-        ...
+    @protected
+    async def __call__(self, socket: WebSocketServerProtocol, model: GetOnlineUserListModel, token: str):
+        await socket.send(output("пользователи онлайн",
+                                 [{AccountAliases.ID: user.user_id,
+                                   AccountAliases.nickname: user.nickname}
+                                  for user in Cash.online.values()]))
 
 
 class ChangeNick(BaseEvent):
 
-    @staticmethod
-    async def __change_in_cash(socket: WebSocketServerProtocol, nickname: str):
-        Cash.online[socket.id].set_cash(nickname=nickname)
-
-    @staticmethod
-    async def __change_in_db(socket: WebSocketServerProtocol, db, nickname: str, target_id: int):
-        try:
-            await db.execute(
-                update(accounts).values({AccountAliases.nickname: nickname})
-                .where(accounts.c[AccountAliases.ID] == target_id)
-            )
-            await ChangeNick.__change_in_cash(socket=socket, nickname=nickname)
-            await db.commit()
-        except IntegrityError:
-            raise InternalError("ник уже занят")
-
-    # @permission(Ranks.USER, update_cash=False)
+    @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: ChangeNickModel, token: str):
-        requester_id: int = Cash.online[socket.id].user_id  # ID отправившего запрос
-        is_owner: bool = True if requester_id == model.ID else False
+        user: User = Cash.online[socket.id]
 
-        if is_owner:
-            async with engine.connect() as db:
-                try:
-                    await ChangeNick.__change_in_db(socket, db, model.nickname, model.ID)
-                    await socket.send(
-                        Response("ник успешно изменен")
-                    )
-                    return
-                except IntegrityError:
-                    raise InternalError("ник уже занят")
-        else:
-            requester = accounts.alias("инициатор")
-            target = accounts.alias("цель")
-            async with engine.connect() as db:
-                cursor: CursorResult = await db.execute(
-                    select(
-                        requester.c[AccountAliases.rank].label("ранг инициатора"),
-                        target.c[AccountAliases.rank].label("ранг цели")
-                    )
-                    .where(requester.c[AccountAliases.ID] == requester_id)
-                    .where(target.c[AccountAliases.ID] == model.ID)
+        async with engine.connect() as connection:
+            try:
+                cursor: CursorResult = await connection.execute(
+                    update(accounts)
+                    .values({AccountAliases.nickname: model.nickname})
+                    .where(accounts.c[AccountAliases.ID] == user.user_id)
                 )
+                if cursor.rowcount != 1:
+                    await connection.rollback()
+                    raise InternalError("ошибка изменения аккаунта")
+            except IntegrityError as e:
+                print(e)
+                raise InternalError("такой ник уже существует")
+        await socket.send(output("ник изменен"))
+        Cash.online[socket.id].nickname = model.nickname
 
-                result: Optional[dict] = cursor.mappings().fetchone()
 
-                if not result:
-                    raise InternalError("пользователя не существует")
-                result = dict(result)
-                if permissions[result["ранг инициатора"]] > permissions[result["ранг цели"]]:
-                    try:
-                        await ChangeNick.__change_in_db(socket, db, model.nickname, model.ID)
-                        await socket.send(
-                            Response("ник успешно изменен")
-                        )
-                        return
-                    except IntegrityError:
-                        raise InternalError("ник уже занят")
-                else:
-                    raise InternalError("недостаточно прав")
+class ChangePassword(BaseEvent):
+
+    @protected
+    async def __call__(self, socket: WebSocketServerProtocol, model: ChangePasswordModel, token: str):
+        user: User = Cash.online[socket.id]
+        new_password = PasswordManager.get_hash(model.password)
+        async with engine.connect() as connection:
+            cursor: CursorResult = await connection.execute(
+                update(accounts)
+                .values({AccountAliases.password: new_password})
+                .where(accounts.c[AccountAliases.ID] == user.user_id)
+            )
+            if cursor.rowcount != 1:
+                await connection.rollback()
+                raise InternalError("ошибка изменения аккаунта")
+        await socket.send(output("пароль изменен"))
+        Cash.online[socket.id].nickname = model.nickname
 
 
 class Relocation(BaseEvent):
 
-    # @permission(Ranks.USER, update_cash=False)
+    @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: RelocationModel, token: str):
         user: User = Cash.online[socket.id]
         send_public = SendPublic("")
 
-        async with engine.connect() as db:
-            await db.execute(
+        async with engine.connect() as connection:
+            await connection.execute(
                 update(locations).values({RoomAliases.ID: model.room_id}).where(
                     locations.c[AccountAliases.ID] == user.user_id)
             )
-            cursor: CursorResult = await db.execute(
+            await connection.commit()
+            cursor: CursorResult = await connection.execute(
                 select(local_ranks.c[LocalRankAliases.rank])
                 .where(local_ranks.c[AccountAliases.ID] == user.user_id)
                 .where(local_ranks.c[RoomAliases.ID] == model.room_id)
             )
+
             rank: LocalRanks = cursor.scalar()
-            await db.commit()
-            cursor: CursorResult = await db.execute(
+            cursor: CursorResult = await connection.execute(
                 select(rooms.c[RoomAliases.title])
                 .where(rooms.c[RoomAliases.ID == model.room_id])
             )

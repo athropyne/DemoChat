@@ -19,8 +19,8 @@ class RoomAliases:
 
 class LocalRanks(str, Enum):
     OWNER = "хозяин"
-    ADMINISTRATOR = "администратор"
     MODERATOR = "модератор"
+    BANNED = "забанен"
 
 
 @dataclass

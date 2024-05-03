@@ -1,8 +1,8 @@
 from typing import Optional, Dict, Set
 from uuid import UUID
+import weakref
 
 from websockets import WebSocketServerProtocol
-
 
 
 class User:
@@ -33,9 +33,12 @@ class User:
 
     @location_id.setter
     def location_id(self, value):
-        if value not in Cash.channels:
+        print(f"{value=}")
+        if value not in Cash.channels and value is not None:
             Cash.channels[value] = set()
-        Cash.channels[value].add(self)
+            if self.__location_id is not None:
+                Cash.channels[self.__location_id].remove(self)
+            Cash.channels[value].add(self)
         self.__location_id = value
 
     @property
@@ -46,6 +49,7 @@ class User:
     def user_id(self, value):
         Cash.ids[value] = self
         self.__user_id = value
+
 
 
 class Cash:

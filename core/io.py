@@ -30,7 +30,7 @@ def output(event: str, payload: Optional[IO_TYPE] = None):
 
 class Error(BaseModel):
     error: str = Field(serialization_alias="!")
-    payload: IO_TYPE = Field(serialization_alias="#")
+    payload: Optional[IO_TYPE] = Field(serialization_alias="#")
 
 
 class InternalError(Exception):
