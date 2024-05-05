@@ -9,7 +9,7 @@ from core.database import engine
 from core.io import InternalError, output
 from core.schemas import rooms, locations, local_ranks
 from core.security import protected
-from core.user_cash import Cash
+from core.user_cash import Cash, online, UserLink
 from services.accounts.aliases import AccountAliases
 from services.accounts.events import Relocation
 from services.accounts.models import RelocationModel
@@ -25,14 +25,14 @@ class CreateRoom(BaseEvent):
         )
         return cursor.lastrowid
 
-    async def __update_location(self, db, room_id, user_id):
-        cursor: CursorResult = await db.execute(
+    async def __update_location(self, db: AsyncConnection, room_id: int, user_id: int):
+        await db.execute(
             update(locations)
             .values({RoomAliases.ID: room_id})
             .where(locations.c[AccountAliases.ID] == user_id)
         )
 
-    async def __add_local_rank(self, db, room_id, user_id):
+    async def __add_local_rank(self, db: AsyncConnection, room_id: int, user_id: int):
         await db.execute(
             insert(local_ranks).values({
                 RoomAliases.ID: room_id,
@@ -43,15 +43,15 @@ class CreateRoom(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: CreateRoomModel, token: str):
-        user: User = Cash.online[socket.id]
+        user: UserLink = online[socket.id]
         data: dict = model.model_dump(by_alias=True)
         async with engine.connect() as db:
             try:
                 room_id = await self.__create(db, data)
             except IntegrityError as e:
                 raise InternalError("такая комната уже есть")
-            await self.__update_location(db, room_id, user.user_id)
-            await self.__add_local_rank(db, room_id, user.user_id)
+            await self.__update_location(db, room_id, user.ID)
+            await self.__add_local_rank(db, room_id, user.ID)
             await db.commit()
         await socket.send(output("комната создана"))
         await Relocation("")(socket, RelocationModel(**{RoomAliases.ID: room_id}), token)

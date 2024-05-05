@@ -1,8 +1,31 @@
+from dataclasses import dataclass
 from typing import Optional, Dict, Set
 from uuid import UUID
 import weakref
-
+from redis.asyncio import Redis
+import redis
+from pydantic import BaseModel
 from websockets import WebSocketServerProtocol
+
+from services.rooms.aliases import LocalRanks
+
+USER_ID = int
+ROOM_ID = int
+
+
+@dataclass
+class UserLink:
+    socket: WebSocketServerProtocol
+    ID: Optional[USER_ID] = None
+    token: Optional[str] = None
+
+
+class UserCash(BaseModel):
+    ID: USER_ID
+    token: str
+    nickname: str
+    local_rank: Optional[LocalRanks] = None
+    location_id: Optional[ROOM_ID] = None
 
 
 class User:
@@ -51,8 +74,19 @@ class User:
         self.__user_id = value
 
 
+online: Dict[UUID, UserLink] = {}
+
+
+class Storage:
+    async def __aenter__(self):
+        self.connection: Redis = Redis(decode_responses=True)
+        return self.connection
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.connection.close()
+
 
 class Cash:
-    online: Dict[UUID, User] = {}
+    online: Dict[UUID, UserLink] = {}
     channels: Dict[Optional[int], Set[User]] = {}
     ids: Dict[int, User] = {}

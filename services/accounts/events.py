@@ -1,6 +1,8 @@
+import asyncio
 from typing import Optional, Type
 
 from pydantic import BaseModel
+from redis.asyncio import Redis
 from sqlalchemy import CursorResult, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -13,7 +15,7 @@ from core.io import InternalError, output
 from core.managers import Token, PasswordManager
 from core.schemas import accounts, locations, local_ranks, rooms
 from core.security import protected
-from core.user_cash import Cash
+from core.user_cash import Cash, UserLink, online, Storage, UserCash
 from services.accounts.aliases import AccountAliases, AccountStatuses
 from services.accounts.models import CreateModel, AuthModel, GetOneUserOut, GetOneUserModel, GetOnlineUserListModel, \
     ChangeNickModel, RelocationModel, ChangePasswordModel
@@ -44,13 +46,17 @@ class Create(BaseEvent):
             )
             await db.commit()
         token = Token.generate()
-        cu: User = Cash.online[socket.id]
-
-        cu.location_id = None
-        cu.local_rank = None
-        cu.nickname = model.nickname
-        cu.user_id = user_id
-        cu.token = token
+        online[socket.id].ID = user_id
+        online[socket.id].token = token
+        async with Storage() as connection:
+            await connection.hset(
+                name=f"user:{user_id}",
+                mapping=UserCash(
+                    ID=user_id,
+                    token=token,
+                    nickname=model.nickname
+                ).model_dump(exclude_none=True)
+            )
 
         await socket.send(output("успешная регистрация", {"токен": token}))
 
@@ -81,7 +87,7 @@ class Auth(BaseEvent):
     async def __call__(self, socket: WebSocketServerProtocol, model: AuthModel, token: str) -> None:
         user: Optional[dict] = await Auth.__get_user(model)
         if user is not None:
-            if PasswordManager.verify_hash(model.password, user[AccountAliases.password]):
+            if not PasswordManager.verify_hash(model.password, user[AccountAliases.password]):
                 raise InternalError("неверный пароль")
             else:
                 if user[RoomAliases.ID] is not None:
@@ -93,13 +99,19 @@ class Auth(BaseEvent):
                         )
                         user[LocalRankAliases.rank] = local_rank_cursor.scalar()
                 token = Token.generate()
-                cu: User = Cash.online[socket.id]
-
-                cu.location_id = user[RoomAliases.ID]
-                cu.local_rank = user.get(LocalRankAliases.rank)
-                cu.nickname = user[AccountAliases.nickname]
-                cu.user_id = user[AccountAliases.ID]
-                cu.token = token
+                online[socket.id].ID = user[AccountAliases.ID]
+                online[socket.id].token = token
+                async with Storage() as connection:
+                    await connection.hset(
+                        name=f"user:{user[AccountAliases.ID]}",
+                        mapping=UserCash(
+                            ID=user[AccountAliases.ID],
+                            token=token,
+                            nickname=model.nickname,
+                            location_id=user[RoomAliases.ID],
+                            location_rank=user.get(LocalRankAliases.rank)
+                        ).model_dump(exclude_none=True)
+                    )
                 await socket.send(output("успешная авторизация", {"токен": token}))
         else:
             raise InternalError("пользователя не существует")
@@ -150,26 +162,35 @@ class GetOnlineUserList(BaseEvent):
     def __init__(self, name: str):
         super().__init__(name)
 
+    async def get_one(self, connection: Redis, top_level_key: str):
+        return await connection.hmget(top_level_key, ["ID", "nickname", "location_id"])
+
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: GetOnlineUserListModel, token: str):
+        async with Storage() as connection:
+            top_level_keys: list = await connection.keys("user:*")
+            result = await asyncio.gather(*[self.get_one(connection, k) for k in top_level_keys])
+
+            result = [{AccountAliases.ID: int(i[0]),
+                       AccountAliases.nickname: i[1],
+                       AccountAliases.location: None if not i[2] else int(i[2])} for i in result]
         await socket.send(output("пользователи онлайн",
-                                 [{AccountAliases.ID: user.user_id,
-                                   AccountAliases.nickname: user.nickname}
-                                  for user in Cash.online.values()]))
+                                 result
+                                 ))
 
 
 class ChangeNick(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: ChangeNickModel, token: str):
-        user: User = Cash.online[socket.id]
+        user: UserLink = online[socket.id]
 
         async with engine.connect() as connection:
             try:
                 cursor: CursorResult = await connection.execute(
                     update(accounts)
                     .values({AccountAliases.nickname: model.nickname})
-                    .where(accounts.c[AccountAliases.ID] == user.user_id)
+                    .where(accounts.c[AccountAliases.ID] == user.ID)
                 )
                 if cursor.rowcount != 1:
                     await connection.rollback()
@@ -178,44 +199,48 @@ class ChangeNick(BaseEvent):
                 print(e)
                 raise InternalError("такой ник уже существует")
         await socket.send(output("ник изменен"))
-        Cash.online[socket.id].nickname = model.nickname
+        async with Storage() as connection:
+            await connection.hset(
+                f"user:{user.ID}",
+                "nickname",
+                model.nickname
+            )
 
 
 class ChangePassword(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: ChangePasswordModel, token: str):
-        user: User = Cash.online[socket.id]
+        user: UserLink = online[socket.id]
         new_password = PasswordManager.get_hash(model.password)
         async with engine.connect() as connection:
             cursor: CursorResult = await connection.execute(
                 update(accounts)
                 .values({AccountAliases.password: new_password})
-                .where(accounts.c[AccountAliases.ID] == user.user_id)
+                .where(accounts.c[AccountAliases.ID] == user.ID)
             )
             if cursor.rowcount != 1:
                 await connection.rollback()
                 raise InternalError("ошибка изменения аккаунта")
         await socket.send(output("пароль изменен"))
-        Cash.online[socket.id].nickname = model.nickname
 
 
 class Relocation(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: RelocationModel, token: str):
-        user: User = Cash.online[socket.id]
+        user: UserLink = online[socket.id]
         send_public = SendPublic("")
 
         async with engine.connect() as connection:
             await connection.execute(
                 update(locations).values({RoomAliases.ID: model.room_id}).where(
-                    locations.c[AccountAliases.ID] == user.user_id)
+                    locations.c[AccountAliases.ID] == user.ID)
             )
             await connection.commit()
             cursor: CursorResult = await connection.execute(
                 select(local_ranks.c[LocalRankAliases.rank])
-                .where(local_ranks.c[AccountAliases.ID] == user.user_id)
+                .where(local_ranks.c[AccountAliases.ID] == user.ID)
                 .where(local_ranks.c[RoomAliases.ID] == model.room_id)
             )
 
@@ -225,17 +250,40 @@ class Relocation(BaseEvent):
                 .where(rooms.c[RoomAliases.ID == model.room_id])
             )
             target_room_title = cursor.scalar()
-        if user.location_id:
+        async with Storage() as connection:
+            location_id, nickname = await connection.hmget(
+                f"user:{user.ID}",
+                "location_id",
+                "nickname"
+            )
+            if location_id:
+                await send_public(socket,
+                                  NewPublicModel(
+                                      **{
+                                          PublicAliases.text: f"[{nickname} перешел в комнату {target_room_title}]"}
+                                  ),
+                                  token)
+
+                await connection.hdel(
+                    f"location:{location_id}",
+                    "user_id",
+                    "socket_id"
+                )
+            await connection.hset(
+                f"location:{model.room_id}",
+                user.ID,
+                socket.id.hex
+            )
+            await connection.hset(
+                f"user:{user.ID}",
+                mapping={"location_id": model.room_id,
+                         "local_rank": rank},
+
+            )
+
+            # Cash.online[socket.id].local_rank = rank
             await send_public(socket,
                               NewPublicModel(
-                                  **{
-                                      PublicAliases.text: f"[перешел в комнату {target_room_title}]"}
+                                  **{PublicAliases.text: f"[{nickname} вошел в комнату]"}
                               ),
                               token)
-        user.location_id = model.room_id
-        Cash.online[socket.id].local_rank = rank
-        await send_public(socket,
-                          NewPublicModel(
-                              **{PublicAliases.text: f"[{Cash.online[socket.id].nickname} вошел в комнату]"}
-                          ),
-                          token)

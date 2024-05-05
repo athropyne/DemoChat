@@ -1,4 +1,5 @@
 import datetime
+from uuid import UUID
 
 from sqlalchemy import CursorResult, insert
 from websockets import WebSocketServerProtocol
@@ -8,7 +9,7 @@ from core.database import engine
 from core.io import output, InternalError
 from core.schemas import public
 from core.security import protected
-from core.user_cash import User, Cash
+from core.user_cash import User, Cash, Storage, online
 from services.accounts.aliases import AccountAliases
 from services.messages.aliases import PublicAliases
 from services.messages.models import NewPublicModel, PublicMessageOut, Author
@@ -18,14 +19,25 @@ from services.rooms.aliases import LocalRankAliases, LocalRanks
 class SendPublic(BaseEvent):
 
     @protected
-    # @permission(Ranks.USER, update_cash=False)
     async def __call__(self, socket: WebSocketServerProtocol, model: NewPublicModel, token: str):
-        user: User = Cash.online[socket.id]
-        if user.local_rank is LocalRanks.BANNED:
+        user_id: int = online[socket.id].ID
+        async with Storage() as connection:
+            location_id, local_rank, nickname = await connection.hmget(
+                f"user:{user_id}",
+                "location_id",
+                "local_rank",
+                "nickname"
+            )
+            print(location_id, local_rank, nickname)
+            users_in_room: dict = await connection.hgetall(
+                f"location:{location_id}"
+            )
+            print(users_in_room)
+        if local_rank is LocalRanks.BANNED:
             raise InternalError("операция недоступна", "вы в бане. парьтесь :)")
         data = {
-            PublicAliases.creator: user.user_id,
-            PublicAliases.room: user.location_id,
+            PublicAliases.creator: user_id,
+            PublicAliases.room: location_id,
             PublicAliases.text: model.text
         }
         message_out = PublicMessageOut(
@@ -34,15 +46,15 @@ class SendPublic(BaseEvent):
                 PublicAliases.created_at: datetime.datetime.utcnow(),
                 PublicAliases.creator: Author(
                     **{
-                        AccountAliases.ID: Cash.online[socket.id].user_id,
-                        AccountAliases.nickname: Cash.online[socket.id].nickname,
-                        LocalRankAliases.rank: Cash.online[socket.id].local_rank
+                        AccountAliases.ID: user_id,
+                        AccountAliases.nickname: nickname,
+                        LocalRankAliases.rank: local_rank
                     }
                 )
             }
         )
-        for local_user in Cash.channels[user.location_id]:
-            await local_user.socket.send(output("новое сообщение", message_out.model_dump(by_alias=True)))
+        for socket_id in users_in_room.values():
+            await online[UUID(socket_id)].socket.send(output("новое сообщение", message_out.model_dump(by_alias=True)))
         async with engine.connect() as db:
             cursor: CursorResult = await db.execute(
                 insert(public).values(data)

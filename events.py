@@ -6,7 +6,7 @@ events = [
     Create("зарегистрироваться"),
     Auth("залогиниться"),
     GetOneUser("получить пользователя"),
-    GetOnlineUserList("получить список пользователей"),
+    GetOnlineUserList("кто онлайн"),
     ChangeNick("изменить ник"),
     Relocation("войти в комнату"),
     CreateRoom("создать комнату"),
