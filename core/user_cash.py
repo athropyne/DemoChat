@@ -1,12 +1,14 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Set
+from traceback import print_tb
+from typing import Optional, Dict
 from uuid import UUID
-import weakref
-from redis.asyncio import Redis
-import redis
+
 from pydantic import BaseModel
+from redis.asyncio import Redis
 from websockets import WebSocketServerProtocol
 
+from core.io import InternalError
+from services.accounts.aliases import AccountAliases
 from services.rooms.aliases import LocalRanks
 
 USER_ID = int
@@ -21,72 +23,30 @@ class UserLink:
 
 
 class UserCash(BaseModel):
-    ID: USER_ID
-    token: str
-    nickname: str
+    ID: Optional[USER_ID] = None
+    token: Optional[str] = None
+    nickname: Optional[str] = None
     local_rank: Optional[LocalRanks] = None
     location_id: Optional[ROOM_ID] = None
-
-
-class User:
-    __slots__ = [
-        "socket",
-        "token",
-        "__user_id",
-        "nickname",
-        "local_rank",
-        "__location_id",
-    ]
-
-    def __init__(
-            self,
-            socket: WebSocketServerProtocol,
-
-    ):
-        self.__location_id = None
-        self.local_rank = None
-        self.nickname = None
-        self.__user_id = None
-        self.token = None
-        self.socket = socket
-
-    @property
-    def location_id(self):
-        return self.__location_id
-
-    @location_id.setter
-    def location_id(self, value):
-        print(f"{value=}")
-        if value not in Cash.channels and value is not None:
-            Cash.channels[value] = set()
-            if self.__location_id is not None:
-                Cash.channels[self.__location_id].remove(self)
-            Cash.channels[value].add(self)
-        self.__location_id = value
-
-    @property
-    def user_id(self):
-        return self.__user_id
-
-    @user_id.setter
-    def user_id(self, value):
-        Cash.ids[value] = self
-        self.__user_id = value
 
 
 online: Dict[UUID, UserLink] = {}
 
 
 class Storage:
+
     async def __aenter__(self):
         self.connection: Redis = Redis(decode_responses=True)
         return self.connection
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # if exc_type:
+        #     raise InternalError("внутренняя ошибка", "ошибка обновления кэша")
         await self.connection.close()
 
 
-class Cash:
-    online: Dict[UUID, UserLink] = {}
-    channels: Dict[Optional[int], Set[User]] = {}
-    ids: Dict[int, User] = {}
+async def set_user_cash(storage: Redis, data: dict):
+    await storage.hset(
+        name=f"user:{data['ID']}",
+        mapping=data
+    )

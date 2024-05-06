@@ -4,7 +4,7 @@ from typing import Callable
 from websockets import WebSocketServerProtocol
 
 from core.io import InternalError
-from core.user_cash import Cash, online
+from core.user_cash import online
 from services.accounts.models import GetOneUserModel
 
 

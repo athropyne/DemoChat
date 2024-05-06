@@ -3,13 +3,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 from websockets import WebSocketServerProtocol
 
-from core import User
 from core.base_event import BaseEvent
 from core.database import engine
 from core.io import InternalError, output
 from core.schemas import rooms, locations, local_ranks
 from core.security import protected
-from core.user_cash import Cash, online, UserLink
+from core.user_cash import online, UserLink
 from services.accounts.aliases import AccountAliases
 from services.accounts.events import Relocation
 from services.accounts.models import RelocationModel
