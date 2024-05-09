@@ -13,15 +13,16 @@ class NewPublicModel(BaseModel):
 
 
 class Author(BaseModel):
-    user_id: int = Field(alias=AccountAliases.ID)
-    nickname: str = Field(alias=AccountAliases.nickname)
-    local_rank: Optional[LocalRanks] = Field(alias=LocalRankAliases.rank)
+    user_id: int = Field(serialization_alias=AccountAliases.ID)
+    nickname: str = Field(serialization_alias=AccountAliases.nickname)
+    local_rank: Optional[LocalRanks] = Field(serialization_alias=LocalRankAliases.rank)
 
 
 class PublicMessageOut(BaseModel):
-    text: str = Field(alias=PublicAliases.text, max_length=256)
-    author: Author = Field(alias=PublicAliases.creator)
-    created_at: datetime.datetime = Field(alias=PublicAliases.created_at)
+    text: str = Field(serialization_alias=PublicAliases.text, max_length=256)
+    author: Author = Field(serialization_alias=PublicAliases.creator)
+    created_at: datetime.datetime = Field(serialization_alias=PublicAliases.created_at,
+                                          default_factory=datetime.datetime.now)
 
 
 

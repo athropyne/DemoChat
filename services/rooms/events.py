@@ -5,7 +5,8 @@ from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.io import InternalError, output
+from core.exc import DuplicateError
+from core.io import  output
 from core.schemas import rooms, locations, local_ranks
 from core.security import protected
 from core.user_cash import online, UserLink
@@ -22,7 +23,7 @@ class CreateRoom(BaseEvent):
         cursor: CursorResult = await db.execute(
             insert(rooms).values(data)
         )
-        return cursor.lastrowid
+        return cursor.inserted_primary_key[0]
 
     async def __update_location(self, db: AsyncConnection, room_id: int, user_id: int):
         await db.execute(
@@ -48,7 +49,7 @@ class CreateRoom(BaseEvent):
             try:
                 room_id = await self.__create(db, data)
             except IntegrityError as e:
-                raise InternalError("такая комната уже есть")
+                raise DuplicateError("такая комната уже есть")
             await self.__update_location(db, room_id, user.ID)
             await self.__add_local_rank(db, room_id, user.ID)
             await db.commit()

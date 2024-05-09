@@ -1,6 +1,8 @@
 import asyncio
 from typing import Optional
+from uuid import UUID
 
+from asyncpg import ForeignKeyViolationError, UniqueViolationError
 from redis.asyncio import Redis
 from sqlalchemy import CursorResult, insert, select, update, RowMapping
 from sqlalchemy.exc import IntegrityError
@@ -10,17 +12,19 @@ from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.io import InternalError, output
+from core.exc import InternalError, DuplicateError, InvalidDataError, NotFoundError, UpdateError
+from core.io import output
 from core.managers import Token, PasswordManager
+from core.out_events import Successfully, OneUserInfo, OnlineUserListInfo, SystemMessage
 from core.schemas import accounts, locations, local_ranks, rooms
 from core.security import protected
 from core.user_cash import UserLink, online, Storage, UserCash, set_user_cash
 from services.accounts.aliases import AccountAliases, AccountStatuses
 from services.accounts.models import CreateModel, AuthModel, GetOneUserOut, GetOneUserModel, GetOnlineUserListModel, \
-    ChangeNickModel, RelocationModel, ChangePasswordModel
+    ChangeNickModel, RelocationModel, ChangePasswordModel, AuthModelOut
 from services.messages.aliases import PublicAliases
 from services.messages.events import SendPublic
-from services.messages.models import NewPublicModel
+from services.messages.models import NewPublicModel, PublicMessageOut, Author
 from services.rooms.aliases import RoomAliases, LocalRankAliases, LocalRanks
 from services.rooms.models import LocationShortInfoModel
 
@@ -32,9 +36,11 @@ class Create(BaseEvent):
             cursor: CursorResult = await db.execute(
                 insert(accounts).values(**data)
             )
-            return cursor.lastrowid
+            return cursor.inserted_primary_key[0]
         except IntegrityError as e:
-            raise InternalError("такой ник уже существует")
+            if isinstance(e.orig.__cause__, UniqueViolationError):
+                raise DuplicateError("такой ник уже существует")
+            raise InternalError("внутренняя ошибка")
 
     async def __add_location(self, db: AsyncConnection, user_id: int):
         await db.execute(
@@ -56,7 +62,9 @@ class Create(BaseEvent):
         cash = UserCash(ID=user_id, token=token, nickname=model.nickname).model_dump(exclude_none=True)
         async with Storage() as storage:
             await set_user_cash(storage, cash)
-        await socket.send(output("успешная регистрация", {"токен": token}))
+        # await socket.send(output("успешная регистрация", {"токен": token}))
+
+        await Successfully()({socket}, AuthModelOut(token=token), self.name)
 
 
 class Auth(BaseEvent):
@@ -93,7 +101,7 @@ class Auth(BaseEvent):
         user: Optional[dict] = await self.__get_user(model.nickname)
         if user is not None:
             if not PasswordManager.verify_hash(model.password, user[AccountAliases.password]):
-                raise InternalError("неверный пароль")
+                raise InvalidDataError("неверный пароль")
             else:
                 if user[RoomAliases.ID] is not None:
                     async with engine.connect() as db:
@@ -111,9 +119,9 @@ class Auth(BaseEvent):
                 ).model_dump(exclude_none=True)
                 async with Storage() as storage:
                     await set_user_cash(storage, cash)
-                await socket.send(output("успешная авторизация", {"токен": token}))
+                await Successfully()({socket}, AuthModelOut(token=token), self.name)
         else:
-            raise InternalError("пользователя не существует")
+            raise NotFoundError("пользователя не существует")
 
 
 class GetOneUser(BaseEvent):
@@ -133,7 +141,6 @@ class GetOneUser(BaseEvent):
             .join(rooms, rooms.c[RoomAliases.ID] == locations.c[RoomAliases.ID], isouter=True)
             .where(accounts.c[AccountAliases.ID] == user_id)
         )
-
         return cursor.mappings().fetchone()
 
     @protected
@@ -141,7 +148,7 @@ class GetOneUser(BaseEvent):
         async with engine.connect() as storage:
             result: Optional[dict] = await self.__get_info(storage, model.ID)
         if not result:
-            raise InternalError("пользователь не найден")
+            raise NotFoundError("пользователь не найден")
         async with Storage() as storage:
             is_online = await storage.exists(f"user:{result[AccountAliases.ID]}")
         mess_out = GetOneUserOut(
@@ -158,8 +165,9 @@ class GetOneUser(BaseEvent):
                 ).model_dump(by_alias=True),
             }
         )
-        await socket.send(output("информация о пользователе",
-                                 GetOneUserOut(**mess_out.model_dump(by_alias=True)).model_dump(by_alias=True)))
+        await OneUserInfo()({socket}, GetOneUserOut(**mess_out.model_dump(by_alias=True)), self.name)
+        # await socket.send(output("информация о пользователе",
+        #                          GetOneUserOut(**mess_out.model_dump(by_alias=True)).model_dump(by_alias=True)))
 
 
 class GetOnlineUserList(BaseEvent):
@@ -178,7 +186,7 @@ class GetOnlineUserList(BaseEvent):
         result = [{AccountAliases.ID: int(i[0]),
                    AccountAliases.nickname: i[1],
                    AccountAliases.location: None if not i[2] else int(i[2])} for i in result]
-        await socket.send(output("пользователи онлайн", result))
+        await OnlineUserListInfo()({socket}, result, self.name)
 
 
 class ChangeNick(BaseEvent):
@@ -195,13 +203,13 @@ class ChangeNick(BaseEvent):
                 )
                 if cursor.rowcount != 1:
                     await connection.rollback()
-                    raise InternalError("ошибка изменения аккаунта")
+                    raise UpdateError("ник не изменен")
             except IntegrityError as e:
-                raise InternalError("такой ник уже существует")
-        await socket.send(output("ник изменен"))
+                raise DuplicateError("такой ник уже существует")
         cash = UserCash(ID=user.ID, nickname=model.nickname).model_dump(exclude_none=True)
         async with Storage() as storage:
             await set_user_cash(storage, cash)
+        await Successfully()({socket}, "ник изменен", None)
 
 
 class ChangePassword(BaseEvent):
@@ -218,18 +226,23 @@ class ChangePassword(BaseEvent):
             )
             if cursor.rowcount != 1:
                 await connection.rollback()
-                raise InternalError("ошибка изменения аккаунта")
-        await socket.send(output("пароль изменен"))
+                raise UpdateError("пароль не изменен")
+        await Successfully()({socket}, "ник изменен", None)
 
 
 class Relocation(BaseEvent):
 
     async def __relocate(self, db: AsyncConnection, user_id: int, room_id: int):
-        await db.execute(
-            update(locations).values({RoomAliases.ID: room_id}).where(
-                locations.c[AccountAliases.ID] == user_id)
-        )
-        await db.commit()
+        try:
+            await db.execute(
+                update(locations).values({RoomAliases.ID: room_id}).where(
+                    locations.c[AccountAliases.ID] == user_id)
+            )
+            await db.commit()
+        except IntegrityError as e:
+            if isinstance(e.orig.__cause__, ForeignKeyViolationError):
+                raise InvalidDataError(f"комнаты с ID {room_id} не существует")
+            raise InternalError("внутренняя ошибка")
 
     async def __get_target_room_rank_and_title(self, db: AsyncConnection, user_id: int, room_id: int):
         lr = select(
@@ -244,61 +257,76 @@ class Relocation(BaseEvent):
                 rooms.c[RoomAliases.title],
                 lr
             )
-            .where(rooms.c[RoomAliases.ID == room_id])
+            .where(rooms.c[RoomAliases.ID] == room_id)
         )
         return cursor.mappings().fetchone()
+
+    async def __get_sockets_in_room(self, connection: Redis, top_level_key: str):
+        return await connection.hgetall(top_level_key)
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: RelocationModel, token: str):
         user: UserLink = online[socket.id]
         send_public = SendPublic("")
-
         async with engine.connect() as db:
             await self.__relocate(db, user.ID, model.room_id)
             result: Optional[RowMapping] = await self.__get_target_room_rank_and_title(db, user.ID,
                                                                                        model.room_id)
-        cash = UserCash(ID=user.ID, location_id=model.room_id, local_rank=result[LocalRankAliases.rank])
+        new_cash = UserCash(ID=user.ID, location_id=model.room_id, local_rank=result[LocalRankAliases.rank])
         async with Storage() as storage:
-
-            location_id, nickname = await storage.hmget(
+            location_id, local_rank, nickname = await storage.hmget(
                 f"user:{user.ID}",
                 "location_id",
+                "local_rank",
                 "nickname"
             )
-            if location_id:
-                await send_public(
-                    socket,
-                    NewPublicModel(
-                        **{
-                            PublicAliases.text: f"[{nickname} перешел в комнату {result[RoomAliases.title]}]"
-                        }
-                    ),
-                    token)
+
             pipline = storage.pipeline()
-            pipline.hdel(
-                f"location:{location_id}",
-                "user_id",
-                "socket_id"
-            )
+            if location_id:
+                pipline.hdel(
+                    f"location:{location_id}",
+                    user.ID
+                )
             pipline.hset(
                 f"location:{model.room_id}",
                 user.ID,
                 socket.id.hex
             )
             pipline.hset(
-                name=f"user:{cash.ID}",
-                mapping=cash.model_dump(exclude_none=True)
+                name=f"user:{new_cash.ID}",
+                mapping=new_cash.model_dump(exclude_none=True)
             )
-            pipline.hset(
-                f"user:{user.ID}",
-                mapping={"location_id": model.room_id,
-                         "local_rank": cash.local_rank},
+            await pipline.execute()
 
+            current_room_sockets, target_room_sockets = await asyncio.gather(
+                *[self.__get_sockets_in_room(storage, i) for i in
+                  (f"location:{location_id}", f"location:{model.room_id}")]
             )
-            result = await pipline.execute()
-            print(f"{result=}")
-        await send_public(socket,
-                          NewPublicModel(
-                              **{PublicAliases.text: f"[{nickname} вошел в комнату]"}
-                          ),
-                          token)
+            print(f"{current_room_sockets=}")
+            print(f"{target_room_sockets=}")
+        await SystemMessage()(
+            {online[UUID(s)].socket for s in current_room_sockets.values()},
+            PublicMessageOut(
+                text=f"[{nickname} перешел в комнату {result[RoomAliases.title]}]",
+                author=Author(
+                    user_id=user.ID,
+                    nickname=nickname,
+                    local_rank=local_rank,
+                )
+            )
+        )
+        await SystemMessage()(
+            {online[UUID(s)].socket for s in target_room_sockets.values()},
+            PublicMessageOut(
+                text=f"[{nickname} вошел в комнату]",
+                author=Author(
+                    user_id=user.ID,
+                    nickname=nickname,
+                    local_rank=result[LocalRankAliases.rank],
+                )
+            )
+        )
+
+        # await SystemMessage()(
+        #     current_room_sockets,
+        #     NewPublicModel(**{PublicAliases.text: f"[{nickname} вошел в комнату]"}))

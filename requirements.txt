@@ -5,3 +5,4 @@ sqlalchemy
 redis
 aiosqlite
 python-dotenv
+asyncpg

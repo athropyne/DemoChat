@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from traceback import print_tb
 from typing import Optional, Dict
 from uuid import UUID
 
@@ -7,8 +6,6 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 from websockets import WebSocketServerProtocol
 
-from core.io import InternalError
-from services.accounts.aliases import AccountAliases
 from services.rooms.aliases import LocalRanks
 
 USER_ID = int

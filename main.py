@@ -9,7 +9,8 @@ from websockets import WebSocketServerProtocol
 
 import core.database
 import events
-from core.io import InputModel, output, InternalError
+from core.exc import InternalError
+from core.io import InputModel, output
 from core.user_cash import UserLink, online, Storage
 
 events_mapping = {
@@ -24,7 +25,7 @@ async def handler(websocket: WebSocketServerProtocol):
     await websocket.send(output("успешное подключение"))
     while True:
         # try:
-        #     try:
+            try:
         #         try:
                     message = await websocket.recv()
                     data = InputModel.model_validate_json(message)
@@ -33,7 +34,10 @@ async def handler(websocket: WebSocketServerProtocol):
                         raise InternalError("такой команды не существует")
                     model: Type[BaseModel] = inspect.signature(callback).parameters['model'].annotation
                     token: Optional[str] = data.token
-                    await callback(websocket, model(**data.payload), token)
+                    if data.payload is not None:
+                        await callback(websocket, model(**data.payload), token)
+                    else:
+                        await callback(websocket, None, token)
         #         except ValidationError as e:
         #             print_tb(e.__traceback__)
         #             errors = e.errors(include_url=False, include_input=False)
@@ -56,8 +60,8 @@ async def handler(websocket: WebSocketServerProtocol):
         #                 print_tb(e.__traceback__)
         #                 print(e.args)
         #                 raise InternalError("внутренняя ошибка")
-        #     except InternalError as e:
-        #         await websocket.send(e())
+            except InternalError as e:
+                await websocket.send(e())
         # except websockets.exceptions.ConnectionClosed:
         #     print("клиент отключен")
         #     break

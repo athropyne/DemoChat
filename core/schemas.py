@@ -14,7 +14,7 @@ accounts = Table(
     metadata,
     Column(AccountAliases.ID, Integer, primary_key=True, autoincrement=True),
     Column(AccountAliases.nickname, String(16), unique=True, nullable=False),
-    Column(AccountAliases.password, String(36), nullable=False),
+    Column(AccountAliases.password, String(100), nullable=False),
     Column(AccountAliases.created_at, Date, nullable=False, default=datetime.date.today())
 )
 

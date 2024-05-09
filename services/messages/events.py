@@ -6,7 +6,7 @@ from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.io import output, InternalError
+from core.io import output
 from core.schemas import public
 from core.security import protected
 from core.user_cash import Storage, online
@@ -16,7 +16,7 @@ from services.messages.models import NewPublicModel, PublicMessageOut, Author
 from services.rooms.aliases import LocalRankAliases, LocalRanks
 
 
-class SendPublic(BaseEvent):
+class  SendPublic(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: NewPublicModel, token: str):
@@ -53,8 +53,6 @@ class SendPublic(BaseEvent):
                 )
             }
         )
-        for i in online:
-            print(i)
         for socket_id in users_in_room.values():
             await online[UUID(socket_id)].socket.send(output("новое сообщение", message_out.model_dump(by_alias=True)))
         async with engine.connect() as db:
