@@ -1,17 +1,17 @@
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, auto
 
 
 @dataclass
 class AccountAliases:
-    ID = "идентификатор пользователя"
-    nickname = "ник"
-    password = "пароль"
-    created_at = "дата регистрации"
-    location = "локация"
-    status = "статус"
+    ID = "user_id"
+    nickname = "nickname"
+    password = "password"
+    created_at = "created_at"
+    location = "location"
+    status = "status"
 
 
-class AccountStatuses(str,Enum):
-    ONLINE = "онлайн"
-    OFFLINE = "оффлайн"
+class AccountStatuses(str, Enum):
+    ONLINE = "online"
+    OFFLINE = "ofline"

@@ -2,6 +2,7 @@ import hashlib
 import os
 
 import passlib.context
+from pydantic import BaseModel
 
 
 class PasswordManager:

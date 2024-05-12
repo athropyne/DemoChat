@@ -1,7 +1,6 @@
 import datetime
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, Union
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,8 +11,8 @@ from services.rooms.models import LocationShortInfoModel
 
 
 class AuthModel(BaseModel):
-    nickname: str = Field(alias=AccountAliases.nickname, max_length=16)
-    password: str = Field(alias=AccountAliases.password, max_length=36)
+    nickname: str = Field(alias=AccountAliases.nickname,max_length=16)
+    password: str = Field(alias=AccountAliases.password,max_length=36)
 
 
 class CreateModel(AuthModel):
@@ -21,7 +20,7 @@ class CreateModel(AuthModel):
 
 
 class AuthModelOut(BaseModel):
-    token: str = Field(serialization_alias="токен")
+    token: str
 
 
 class GetOneUserModel(BaseModel):

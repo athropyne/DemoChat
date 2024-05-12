@@ -7,24 +7,22 @@ from redis.asyncio import Redis
 from sqlalchemy import CursorResult, insert, select, update, RowMapping
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
-from sqlalchemy.sql.base import ReadOnlyColumnCollection
 from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
+from core.config import TOKEN_EXPIRE
 from core.database import engine
 from core.exc import InternalError, DuplicateError, InvalidDataError, NotFoundError, UpdateError
-from core.io import output
 from core.managers import Token, PasswordManager
-from core.out_events import Successfully, OneUserInfo, OnlineUserListInfo, SystemMessage
+from core.out_events import Successfully, OneUserInfo, OnlineUserListInfo, SystemMessage, NewToken
 from core.schemas import accounts, locations, local_ranks, rooms
 from core.security import protected
-from core.user_cash import UserLink, online, Storage, UserCash, set_user_cash
+from core.user_cash import Cash, User
 from services.accounts.aliases import AccountAliases, AccountStatuses
 from services.accounts.models import CreateModel, AuthModel, GetOneUserOut, GetOneUserModel, GetOnlineUserListModel, \
     ChangeNickModel, RelocationModel, ChangePasswordModel, AuthModelOut
-from services.messages.aliases import PublicAliases
 from services.messages.events import SendPublic
-from services.messages.models import NewPublicModel, PublicMessageOut, Author
+from services.messages.models import PublicMessageOut, Author
 from services.rooms.aliases import RoomAliases, LocalRankAliases, LocalRanks
 from services.rooms.models import LocationShortInfoModel
 
@@ -46,7 +44,7 @@ class Create(BaseEvent):
         await db.execute(
             insert(locations).values({
                 AccountAliases.ID: user_id,
-                RoomAliases.ID: None})
+                RoomAliases.ID: 1})
         )
 
     async def __call__(self, socket: WebSocketServerProtocol, model: CreateModel, token: str):
@@ -57,14 +55,14 @@ class Create(BaseEvent):
             await self.__add_location(db, user_id)
             await db.commit()
         token = Token.generate()
-        online[socket.id].ID = user_id
-        online[socket.id].token = token
-        cash = UserCash(ID=user_id, token=token, nickname=model.nickname).model_dump(exclude_none=True)
-        async with Storage() as storage:
-            await set_user_cash(storage, cash)
-        # await socket.send(output("успешная регистрация", {"токен": token}))
-
-        await Successfully()({socket}, AuthModelOut(token=token), self.name)
+        Cash.online[socket.id].ID = user_id
+        Cash.online[socket.id].nickname = model.nickname
+        Cash.online[socket.id].token = token
+        Cash.online[socket.id].location_id = 1
+        Cash.online[socket.id].local_rank = LocalRanks.USER
+        Cash.online[socket.id].token = token
+        await Successfully()(socket, model="успешная регистрация", token=self.name)
+        await NewToken()(socket, model=AuthModelOut(token=token), token=self.name)
 
 
 class Auth(BaseEvent):
@@ -80,7 +78,7 @@ class Auth(BaseEvent):
                     accounts.c[AccountAliases.password],
                     locations.c[RoomAliases.ID],
                 )
-                .join(locations, accounts.c[AccountAliases.ID], isouter=True)
+                .join(locations, accounts.c[AccountAliases.ID] == locations.c[AccountAliases.ID], isouter=True)
                 .where(
                     accounts.c[AccountAliases.nickname] == nickname
                 )
@@ -107,19 +105,22 @@ class Auth(BaseEvent):
                     async with engine.connect() as db:
                         user[LocalRankAliases.rank] = await self.__get_local_rank(db, user[AccountAliases.ID],
                                                                                   user[RoomAliases.ID])
+
                 token = Token.generate()
-                online[socket.id].ID = user[AccountAliases.ID]
-                online[socket.id].token = token
-                cash: dict = UserCash(
-                    ID=user[AccountAliases.ID],
-                    token=token,
-                    nickname=model.nickname,
-                    location_id=user[RoomAliases.ID],
-                    location_rank=user.get(LocalRankAliases.rank)
-                ).model_dump(exclude_none=True)
-                async with Storage() as storage:
-                    await set_user_cash(storage, cash)
-                await Successfully()({socket}, AuthModelOut(token=token), self.name)
+
+                Cash.online[socket.id].ID = user[AccountAliases.ID]
+                Cash.online[socket.id].nickname = model.nickname
+                Cash.online[socket.id].token = token
+                Cash.online[socket.id].location_id = user[RoomAliases.ID]
+                Cash.online[socket.id].local_rank = LocalRanks.USER if user[LocalRankAliases.rank] is None else user[
+                    LocalRankAliases.rank]
+                Cash.online[socket.id].token = token
+                print(Cash.online[socket.id].location_id)
+                print(Cash.online[socket.id].local_rank)
+                print(Cash.location)
+
+                await Successfully()(socket, model="успешная авторизация", token=self.name)
+                await NewToken()(socket, model=AuthModelOut(token=token))
         else:
             raise NotFoundError("пользователя не существует")
 
@@ -149,14 +150,13 @@ class GetOneUser(BaseEvent):
             result: Optional[dict] = await self.__get_info(storage, model.ID)
         if not result:
             raise NotFoundError("пользователь не найден")
-        async with Storage() as storage:
-            is_online = await storage.exists(f"user:{result[AccountAliases.ID]}")
+        status = AccountStatuses.ONLINE if result[AccountAliases.ID] in Cash.ids else AccountStatuses.OFFLINE
         mess_out = GetOneUserOut(
             **{
                 AccountAliases.ID: result[AccountAliases.ID],
                 AccountAliases.nickname: result[AccountAliases.nickname],
                 AccountAliases.created_at: result[AccountAliases.created_at],
-                AccountAliases.status: AccountStatuses.ONLINE if is_online else AccountStatuses.OFFLINE,
+                AccountAliases.status: status,
                 AccountAliases.location: LocationShortInfoModel(
                     **{
                         RoomAliases.ID: result[RoomAliases.ID],
@@ -165,34 +165,27 @@ class GetOneUser(BaseEvent):
                 ).model_dump(by_alias=True),
             }
         )
-        await OneUserInfo()({socket}, GetOneUserOut(**mess_out.model_dump(by_alias=True)), self.name)
-        # await socket.send(output("информация о пользователе",
-        #                          GetOneUserOut(**mess_out.model_dump(by_alias=True)).model_dump(by_alias=True)))
+        await OneUserInfo()(socket, model=GetOneUserOut(**mess_out.model_dump(by_alias=True)), token=self.name)
 
 
 class GetOnlineUserList(BaseEvent):
     def __init__(self, name: str):
         super().__init__(name)
 
-    async def __get_one_from_cash(self, connection: Redis, top_level_key: str):
-        return await connection.hmget(top_level_key, ["ID", "nickname", "location_id"])
-
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: GetOnlineUserListModel, token: str):
-        async with Storage() as connection:
-            top_level_keys: list = await connection.keys("user:*")
-            result = await asyncio.gather(*[self.__get_one_from_cash(connection, k) for k in top_level_keys])
-
-        result = [{AccountAliases.ID: int(i[0]),
-                   AccountAliases.nickname: i[1],
-                   AccountAliases.location: None if not i[2] else int(i[2])} for i in result]
-        await OnlineUserListInfo()({socket}, result, self.name)
+        result = [{
+            AccountAliases.ID: u.ID,
+            AccountAliases.nickname: u.nickname,
+            AccountAliases.location: u.location_id
+        } for u in Cash.online.values()]
+        await OnlineUserListInfo()(socket, model=result, token=self.name)
 
 
 class ChangeNick(BaseEvent):
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: ChangeNickModel, token: str):
-        user: UserLink = online[socket.id]
+        user: User = Cash.online[socket.id]
 
         async with engine.connect() as connection:
             try:
@@ -205,18 +198,20 @@ class ChangeNick(BaseEvent):
                     await connection.rollback()
                     raise UpdateError("ник не изменен")
             except IntegrityError as e:
-                raise DuplicateError("такой ник уже существует")
-        cash = UserCash(ID=user.ID, nickname=model.nickname).model_dump(exclude_none=True)
-        async with Storage() as storage:
-            await set_user_cash(storage, cash)
-        await Successfully()({socket}, "ник изменен", None)
+                if isinstance(e.orig.__cause__, UniqueViolationError):
+                    raise DuplicateError("такой ник уже существует")
+                raise InternalError("внутренняя ошибка")
+            await connection.commit()
+        user.nickname = model.nickname
+
+        await Successfully()(socket, model="ник изменен")
 
 
 class ChangePassword(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: ChangePasswordModel, token: str):
-        user: UserLink = online[socket.id]
+        user: User = Cash.online[socket.id]
         new_password = PasswordManager.get_hash(model.password)
         async with engine.connect() as connection:
             cursor: CursorResult = await connection.execute(
@@ -227,7 +222,7 @@ class ChangePassword(BaseEvent):
             if cursor.rowcount != 1:
                 await connection.rollback()
                 raise UpdateError("пароль не изменен")
-        await Successfully()({socket}, "ник изменен", None)
+        await Successfully()(socket, model="ник изменен")
 
 
 class Relocation(BaseEvent):
@@ -261,67 +256,37 @@ class Relocation(BaseEvent):
         )
         return cursor.mappings().fetchone()
 
-    async def __get_sockets_in_room(self, connection: Redis, top_level_key: str):
-        return await connection.hgetall(top_level_key)
-
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: RelocationModel, token: str):
-        user: UserLink = online[socket.id]
-        send_public = SendPublic("")
+        user: User = Cash.online[socket.id]
         async with engine.connect() as db:
             await self.__relocate(db, user.ID, model.room_id)
             result: Optional[RowMapping] = await self.__get_target_room_rank_and_title(db, user.ID,
                                                                                        model.room_id)
-        new_cash = UserCash(ID=user.ID, location_id=model.room_id, local_rank=result[LocalRankAliases.rank])
-        async with Storage() as storage:
-            location_id, local_rank, nickname = await storage.hmget(
-                f"user:{user.ID}",
-                "location_id",
-                "local_rank",
-                "nickname"
-            )
 
-            pipline = storage.pipeline()
-            if location_id:
-                pipline.hdel(
-                    f"location:{location_id}",
-                    user.ID
-                )
-            pipline.hset(
-                f"location:{model.room_id}",
-                user.ID,
-                socket.id.hex
-            )
-            pipline.hset(
-                name=f"user:{new_cash.ID}",
-                mapping=new_cash.model_dump(exclude_none=True)
-            )
-            await pipline.execute()
-
-            current_room_sockets, target_room_sockets = await asyncio.gather(
-                *[self.__get_sockets_in_room(storage, i) for i in
-                  (f"location:{location_id}", f"location:{model.room_id}")]
-            )
-            print(f"{current_room_sockets=}")
-            print(f"{target_room_sockets=}")
         await SystemMessage()(
-            {online[UUID(s)].socket for s in current_room_sockets.values()},
-            PublicMessageOut(
-                text=f"[{nickname} перешел в комнату {result[RoomAliases.title]}]",
+            *{Cash.online[sid].socket for sid in Cash.location[user.location_id] if socket != Cash.online[sid].socket},
+            model=PublicMessageOut(
+                text=f"[{user.nickname} перешел в комнату {result[RoomAliases.title]}]",
                 author=Author(
                     user_id=user.ID,
-                    nickname=nickname,
-                    local_rank=local_rank,
+                    nickname=user.nickname,
+                    local_rank=user.local_rank,
                 )
             )
         )
+
+        user.location_id = model.room_id
+        user.local_rank = result[LocalRankAliases.rank] if result[
+                                                               LocalRankAliases.rank] is not None else LocalRanks.USER
+
         await SystemMessage()(
-            {online[UUID(s)].socket for s in target_room_sockets.values()},
-            PublicMessageOut(
-                text=f"[{nickname} вошел в комнату]",
+            *{Cash.online[sid].socket for sid in Cash.location[model.room_id]},
+            model=PublicMessageOut(
+                text=f"[{user.nickname} вошел в комнату]",
                 author=Author(
                     user_id=user.ID,
-                    nickname=nickname,
+                    nickname=user.nickname,
                     local_rank=result[LocalRankAliases.rank],
                 )
             )

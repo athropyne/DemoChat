@@ -9,7 +9,7 @@ from core.exc import DuplicateError
 from core.io import  output
 from core.schemas import rooms, locations, local_ranks
 from core.security import protected
-from core.user_cash import online, UserLink
+from core.user_cash import online, User, Cash
 from services.accounts.aliases import AccountAliases
 from services.accounts.events import Relocation
 from services.accounts.models import RelocationModel
@@ -37,13 +37,13 @@ class CreateRoom(BaseEvent):
             insert(local_ranks).values({
                 RoomAliases.ID: room_id,
                 AccountAliases.ID: user_id,
-                LocalRankAliases.rank: LocalRanks.OWNER
+                LocalRankAliases.rank: LocalRanks.OWNER.name
             })
         )
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: CreateRoomModel, token: str):
-        user: UserLink = online[socket.id]
+        user: User = Cash.online[socket.id]
         data: dict = model.model_dump(by_alias=True)
         async with engine.connect() as db:
             try:
@@ -54,7 +54,6 @@ class CreateRoom(BaseEvent):
             await self.__add_local_rank(db, room_id, user.ID)
             await db.commit()
         await socket.send(output("комната создана"))
-        await Relocation("")(socket, RelocationModel(**{RoomAliases.ID: room_id}), token)
 
 
 class UpdatePermission(BaseEvent):
@@ -82,7 +81,7 @@ class UpdatePermission(BaseEvent):
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: AddLocalPermissionModel, token: str):
         requester_user: User = Cash.online[socket.id]
-        target_user: User = Cash.ids[model.target_user_id]
+        target_user: User = Cash[model.target_user_id]
         lpl: dict = local_permission_level
         rur: LocalRanks = requester_user.local_rank
         tur: LocalRanks = target_user.local_rank

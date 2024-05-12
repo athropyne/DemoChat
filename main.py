@@ -11,7 +11,7 @@ import core.database
 import events
 from core.exc import InternalError
 from core.io import InputModel, output
-from core.user_cash import UserLink, online, Storage
+from core.user_cash import online, User, Cash
 
 events_mapping = {
     event.name: event.__call__
@@ -21,7 +21,7 @@ events_mapping = {
 
 
 async def handler(websocket: WebSocketServerProtocol):
-    online[websocket.id] = UserLink(socket=websocket)  # запомнили подключение
+    Cash.online[websocket.id] = User(socket=websocket)  # запомнили подключение
     await websocket.send(output("успешное подключение"))
     while True:
         # try:
@@ -38,6 +38,19 @@ async def handler(websocket: WebSocketServerProtocol):
                         await callback(websocket, model(**data.payload), token)
                     else:
                         await callback(websocket, None, token)
+
+                    for sid, user in Cash.online.items():
+                        print(f"{sid=}")
+                        print(f"{user.ID=}")
+                        print(f"{user.nickname=}")
+                        print(f"{user.location_id=}")
+                        print(f"{user.local_rank=}")
+                        print(f"{Cash.ids[user.ID]=}")
+                    print()
+                    for rid, sid in Cash.location.items():
+                        print(f"{rid=}")
+                        print(f"{sid}")
+                    print()
         #         except ValidationError as e:
         #             print_tb(e.__traceback__)
         #             errors = e.errors(include_url=False, include_input=False)
@@ -69,8 +82,6 @@ async def handler(websocket: WebSocketServerProtocol):
 
 
 async def main():
-    async with Storage() as storage:
-        await storage.flushall(asynchronous=True)
     await core.database.init()
     async with websockets.serve(handler, "", 8001):
         await asyncio.Future()

@@ -9,7 +9,7 @@ from core.database import engine
 from core.io import output
 from core.schemas import public
 from core.security import protected
-from core.user_cash import Storage, online
+from core.user_cash import Cash
 from services.accounts.aliases import AccountAliases
 from services.messages.aliases import PublicAliases
 from services.messages.models import NewPublicModel, PublicMessageOut, Author
@@ -20,8 +20,8 @@ class  SendPublic(BaseEvent):
 
     @protected
     async def __call__(self, socket: WebSocketServerProtocol, model: NewPublicModel, token: str):
-        user_id: int = online[socket.id].ID
-        async with Storage() as connection:
+        user_id: int = Cash.online[socket.id].ID
+        async with Cash.Storage() as connection:
             location_id, local_rank, nickname = await connection.hmget(
                 f"user:{user_id}",
                 "location_id",

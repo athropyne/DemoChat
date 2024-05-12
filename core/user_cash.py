@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -10,40 +10,84 @@ from services.rooms.aliases import LocalRanks
 
 USER_ID = int
 ROOM_ID = int
+SOCKET_ID = UUID
 
 
-@dataclass
-class UserLink:
-    socket: WebSocketServerProtocol
-    ID: Optional[USER_ID] = None
-    token: Optional[str] = None
+# @dataclass
+# class UserLink:
+#     socket: WebSocketServerProtocol
+#     ID: Optional[USER_ID] = None
+#     token: Optional[str] = None
 
 
-class UserCash(BaseModel):
-    ID: Optional[USER_ID] = None
-    token: Optional[str] = None
-    nickname: Optional[str] = None
-    local_rank: Optional[LocalRanks] = None
-    location_id: Optional[ROOM_ID] = None
+class User:
+    __slots__ = [
+        "socket",
+        "token",
+        "__ID",
+        "nickname",
+        "local_rank",
+        "__location_id",
+    ]
+
+    def __init__(
+            self,
+            socket: WebSocketServerProtocol
+    ):
+        self.__location_id = None
+        self.local_rank = None
+        self.nickname = None
+        self.__ID = None
+        self.token = None
+        self.socket = socket
+
+    @property
+    def ID(self):
+        return self.__ID
+
+    @ID.setter
+    def ID(self, value):
+        self.__ID = value
+        Cash.ids[value] = self.socket.id
+
+    @property
+    def location_id(self):
+        return self.__location_id
+
+    @location_id.setter
+    def location_id(self, value):
+        if self.location_id is not None:
+            Cash.location[self.location_id].remove(self.socket.id)
+            if len(Cash.location[self.location_id]) == 0:
+                del Cash.location[self.location_id]
+        if value not in Cash.location:
+            Cash.location[value] = set()
+        Cash.location[value].add(self.socket.id)
+        self.__location_id = value
 
 
-online: Dict[UUID, UserLink] = {}
+class Cash:
+    online: Dict[SOCKET_ID, User] = {}
+    ids: Dict[USER_ID, SOCKET_ID] = {}
+    location: Dict[ROOM_ID, Set[SOCKET_ID]] = {}
 
 
-class Storage:
-
-    async def __aenter__(self):
-        self.connection: Redis = Redis(decode_responses=True)
-        return self.connection
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # if exc_type:
-        #     raise InternalError("внутренняя ошибка", "ошибка обновления кэша")
-        await self.connection.close()
-
-
-async def set_user_cash(storage: Redis, data: dict):
-    await storage.hset(
-        name=f"user:{data['ID']}",
-        mapping=data
-    )
+online: Dict[SOCKET_ID, User] = {}
+location: Dict[ROOM_ID, Set[SOCKET_ID]] = {}
+# class Storage:
+#
+#     async def __aenter__(self):
+#         self.connection: Redis = Redis(decode_responses=True)
+#         return self.connection
+#
+#     async def __aexit__(self, exc_type, exc_val, exc_tb):
+#         # if exc_type:
+#         #     raise InternalError("внутренняя ошибка", "ошибка обновления кэша")
+#         await self.connection.close()
+#
+#
+# async def set_user_cash(storage: Redis, data: dict):
+#     await storage.hset(
+#         name=f"user:{data['ID']}",
+#         mapping=data
+#     )

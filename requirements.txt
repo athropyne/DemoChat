@@ -6,3 +6,4 @@ redis
 aiosqlite
 python-dotenv
 asyncpg
+python-jose

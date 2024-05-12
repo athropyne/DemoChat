@@ -14,7 +14,7 @@ class BaseOutEvent(ABC):
         self.name = name
 
     async def __call__(self,
-                       sockets: Set[WebSocketServerProtocol],
+                       *sockets: WebSocketServerProtocol,
                        model: Optional[Union[BaseModel, IO_TYPE]] = None,
                        token: Optional[str] = None):
         payload = model
@@ -30,20 +30,27 @@ class BaseOutEvent(ABC):
 
 class Successfully(BaseOutEvent):
     def __init__(self):
-        super().__init__("успех")
+        super().__init__("success")
+
+
+class NewToken(BaseOutEvent):
+
+    def __init__(self):
+        super().__init__("new_token")
 
 
 class OneUserInfo(BaseOutEvent):
 
     def __init__(self):
-        super().__init__("информация о пользователе")
+        super().__init__("user_info")
 
 
 class OnlineUserListInfo(BaseOutEvent):
 
     def __init__(self):
-        super().__init__("пользователи онлайн")
+        super().__init__("online_list")
+
 
 class SystemMessage(BaseOutEvent):
     def __init__(self):
-        super().__init__("системное сообщение")
+        super().__init__("system")

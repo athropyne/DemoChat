@@ -6,15 +6,15 @@ from services.messages.events import SendPublic
 from services.rooms.events import CreateRoom, UpdatePermission
 
 in_events = [
-    Create("зарегистрироваться"),
-    Auth("залогиниться"),
-    GetOneUser("получить пользователя"),
-    GetOnlineUserList("кто онлайн"),
-    ChangeNick("изменить ник"),
-    Relocation("войти в комнату"),
-    CreateRoom("создать комнату"),
-    SendPublic("написать в комнату"),
-    UpdatePermission("изменить привелегии")
+    Create("signup"),
+    Auth("signin"),
+    GetOneUser("get one user"),
+    GetOnlineUserList("online list"),
+    ChangeNick("change nickname"),
+    Relocation("relocate"),
+    CreateRoom("create room"),
+    SendPublic("send public"),
+    UpdatePermission("update permission")
 ]
 
 out_events = [
