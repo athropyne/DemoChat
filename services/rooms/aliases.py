@@ -1,10 +1,5 @@
 from dataclasses import dataclass
-from enum import Enum, auto
-
-
-# class RoomTypes(str, Enum):
-#     OPENED = "открытая"
-#     CLOSED = "звкрытая"
+from enum import Enum
 
 
 @dataclass
@@ -13,15 +8,13 @@ class RoomAliases:
     title = "title"
     owner_id = "owner_id"
     created_at = "created_at"
-    # administrators = "administrators"
-    # moderators = "moderators"
 
 
-class LocalRanks(Enum):
-    OWNER = auto()
-    MODERATOR = auto()
-    USER = auto()
-    BANNED = auto()
+class LocalRanks(str, Enum):
+    OWNER = "owner"
+    MODERATOR = "moderator"
+    USER = "user"
+    BANNED = "banned"
 
 
 @dataclass

@@ -54,3 +54,8 @@ class OnlineUserListInfo(BaseOutEvent):
 class SystemMessage(BaseOutEvent):
     def __init__(self):
         super().__init__("system")
+
+
+class OnlineRoomList(BaseOutEvent):
+    def __init__(self):
+        super().__init__("online room list")

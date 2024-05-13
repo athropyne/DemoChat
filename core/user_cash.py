@@ -34,12 +34,12 @@ class User:
             self,
             socket: WebSocketServerProtocol
     ):
-        self.__location_id = None
-        self.local_rank = None
-        self.nickname = None
-        self.__ID = None
-        self.token = None
-        self.socket = socket
+        self.__location_id: Optional[int] = None
+        self.local_rank: Optional[LocalRanks] = None
+        self.nickname: Optional[str] = None
+        self.__ID: Optional[int] = None
+        self.token: Optional[str] = None
+        self.socket: WebSocketServerProtocol = socket
 
     @property
     def ID(self):
@@ -70,6 +70,7 @@ class Cash:
     online: Dict[SOCKET_ID, User] = {}
     ids: Dict[USER_ID, SOCKET_ID] = {}
     location: Dict[ROOM_ID, Set[SOCKET_ID]] = {}
+
 
 
 online: Dict[SOCKET_ID, User] = {}

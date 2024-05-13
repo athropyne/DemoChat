@@ -1,13 +1,17 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 
 from pydantic import BaseModel
 from websockets import WebSocketServerProtocol
 
 
 class BaseEvent(ABC):
-    def __init__(self, name: str):
-        self.name = name
+    @abstractmethod
+    def __init__(self, socket: WebSocketServerProtocol, model, token: Optional[str]):
+        self.socket = socket
+        self.model = model
+        self.token = token
 
     @abstractmethod
-    async def __call__(self, socket: WebSocketServerProtocol, model: BaseModel, token: str):
+    async def __call__(self):
         pass

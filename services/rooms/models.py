@@ -24,9 +24,9 @@ class RemoveLocalPermissionModel(BaseModel):
     target_user_id: int = Field(alias=AccountAliases.ID)
 
 
-local_permission_level = {
+local_rank_level = {
     LocalRanks.BANNED: 0,
-    None: 1,
+    LocalRanks.USER: 1,
     LocalRanks.MODERATOR: 2,
     LocalRanks.OWNER: 3,
 }

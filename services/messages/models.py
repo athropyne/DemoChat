@@ -20,7 +20,7 @@ class Author(BaseModel):
 
 class PublicMessageOut(BaseModel):
     text: str = Field(serialization_alias=PublicAliases.text, max_length=256)
-    author: Author = Field(serialization_alias=PublicAliases.creator)
+    creator: Author = Field(serialization_alias=PublicAliases.creator)
     created_at: datetime.datetime = Field(serialization_alias=PublicAliases.created_at,
                                           default_factory=datetime.datetime.now)
 

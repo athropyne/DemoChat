@@ -1,23 +1,32 @@
-from sqlalchemy import CursorResult, insert, update, delete
+from typing import Optional
+
+from pydantic import BaseModel
+from sqlalchemy import CursorResult, insert, update, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.exc import DuplicateError
-from core.io import  output
+from core.exc import DuplicateError, InternalError, AccessDenied
+from core.io import output
+from core.out_events import Successfully, OnlineRoomList
 from core.schemas import rooms, locations, local_ranks
 from core.security import protected
 from core.user_cash import online, User, Cash
 from services.accounts.aliases import AccountAliases
 from services.accounts.events import Relocation
 from services.accounts.models import RelocationModel
+from services.models import Paginator
 from services.rooms.aliases import RoomAliases, LocalRankAliases, LocalRanks
-from services.rooms.models import CreateRoomModel, AddLocalPermissionModel, local_permission_level
+from services.rooms.models import CreateRoomModel, AddLocalPermissionModel, local_rank_level
 
 
 class CreateRoom(BaseEvent):
+
+    @protected
+    def __init__(self, socket: WebSocketServerProtocol, model: CreateRoomModel, token: Optional[str]):
+        super().__init__(socket, model, token)
 
     async def __create(self, db: AsyncConnection, data: dict) -> int:
         cursor: CursorResult = await db.execute(
@@ -41,10 +50,9 @@ class CreateRoom(BaseEvent):
             })
         )
 
-    @protected
-    async def __call__(self, socket: WebSocketServerProtocol, model: CreateRoomModel, token: str):
-        user: User = Cash.online[socket.id]
-        data: dict = model.model_dump(by_alias=True)
+    async def __call__(self):
+        user: User = Cash.online[self.socket.id]
+        data: dict = self.model.model_dump(by_alias=True)
         async with engine.connect() as db:
             try:
                 room_id = await self.__create(db, data)
@@ -53,10 +61,38 @@ class CreateRoom(BaseEvent):
             await self.__update_location(db, room_id, user.ID)
             await self.__add_local_rank(db, room_id, user.ID)
             await db.commit()
-        await socket.send(output("комната создана"))
+        await self.socket.send(output("комната создана"))
+
+
+class GetOnlineRoomList(BaseEvent):
+
+    def __init__(self, socket: WebSocketServerProtocol, model: Paginator, token: Optional[str]):
+        super().__init__(socket, model, token)
+
+    async def __call__(self):
+        location_id = Cash.online[self.socket.id].location_id
+        sockets_in_room = Cash.location[location_id]
+        users_in_room = [{
+            AccountAliases.ID: Cash.online[s].ID,
+            AccountAliases.nickname: Cash.online[s].nickname,
+            LocalRankAliases.rank: Cash.online[s].local_rank
+        } for s in sockets_in_room]
+        await OnlineRoomList()(self.socket, model=users_in_room)
 
 
 class UpdatePermission(BaseEvent):
+    @protected
+    def __init__(self, socket: WebSocketServerProtocol, model: AddLocalPermissionModel, token: Optional[str]):
+        super().__init__(socket, model, token)
+
+    async def __get_local_rank_target_user(self, connection: AsyncConnection, user_id: int, room_id: int):
+        cursor: CursorResult = await connection.execute(
+            select(local_ranks.c[LocalRankAliases.rank])
+            .where(local_ranks.c[AccountAliases.ID] == user_id)
+            .where(local_ranks.c[RoomAliases.ID] == room_id)
+        )
+        return cursor.scalar()
+
     async def __clear_data_stmt(self, connection: AsyncConnection, target_user_id: int, location_id: int):
         await connection.execute(
             delete(local_ranks)
@@ -78,29 +114,36 @@ class UpdatePermission(BaseEvent):
             )
         )
 
-    @protected
-    async def __call__(self, socket: WebSocketServerProtocol, model: AddLocalPermissionModel, token: str):
-        requester_user: User = Cash.online[socket.id]
-        target_user: User = Cash[model.target_user_id]
-        lpl: dict = local_permission_level
-        rur: LocalRanks = requester_user.local_rank
-        tur: LocalRanks = target_user.local_rank
-        if requester_user.location_id == target_user.location_id:
-            if lpl[rur] > lpl[tur]:
-                if lpl[rur] > lpl[model.rank]:
+    async def __call__(self):
+        requester_user: User = Cash.online[self.socket.id]
+        async with engine.connect() as connection:
+            target_user_local_rank = await self.__get_local_rank_target_user(
+                connection=connection,
+                user_id=self.model.target_user_id,
+                room_id=Cash.online[self.socket.id].location_id
+            )
+        if target_user_local_rank is None:
+            target_user_local_rank = LocalRanks.USER
+
+        if local_rank_level[requester_user.local_rank] > local_rank_level[LocalRanks.USER]:
+            if local_rank_level[requester_user.local_rank] > local_rank_level[self.model.rank]:
+                if local_rank_level[requester_user.local_rank] > local_rank_level[target_user_local_rank]:
                     async with engine.connect() as connection:
-                        await self.__clear_data_stmt(connection, model.target_user_id, requester_user.location_id)
-                        if model.rank is not None:
+                        await self.__clear_data_stmt(connection, self.model.target_user_id, requester_user.location_id)
+                        if self.model.rank is not LocalRanks.USER:
                             await self.__update_data_stmt(connection,
-                                                          model.target_user_id,
+                                                          self.model.target_user_id,
                                                           requester_user.location_id,
-                                                          model.rank)
+                                                          self.model.rank)
 
                         await connection.commit()
-                        Cash.ids[target_user.user_id].local_rank = model.rank
+                        if self.model.target_user_id in Cash.ids:
+                            socket_id = Cash.ids[self.model.target_user_id]
+                            Cash.online[socket_id].local_rank = self.model.rank
+                        await Successfully()(self.socket, model="ранг изменен")
                 else:
-                    raise InternalError("операция не доступна", "ваш ранг должен быть выше устанавливаемого")
+                    raise AccessDenied("ваш ранг должен быть выше чем у целевого пользователя")
             else:
-                raise InternalError("операция не доступна", "ваш ранг должен быть выше чем у целевого пользователя")
+                raise AccessDenied("ваш ранг должен быть выше устанавливаемого")
         else:
-            raise InternalError("операция недоступна", "пользователь должен быть онлайн и в той же комнате")
+            raise AccessDenied("ваш ранг должен быть выше чем USER")
