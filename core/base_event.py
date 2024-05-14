@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from pydantic import BaseModel
 from websockets import WebSocketServerProtocol
 
 

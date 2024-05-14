@@ -6,7 +6,6 @@ from websockets import WebSocketServerProtocol
 
 from core.exc import NonAuthorized
 from core.user_cash import Cash
-from services.accounts.models import GetOneUserModel
 
 
 def protected(func: Callable):

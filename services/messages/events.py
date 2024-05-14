@@ -1,8 +1,6 @@
 import datetime
 from typing import Optional
-from uuid import UUID
 
-from pydantic import BaseModel
 from sqlalchemy import CursorResult, insert
 from websockets import WebSocketServerProtocol
 
@@ -19,7 +17,7 @@ from services.messages.models import NewPublicModel, PublicMessageOut, Author
 from services.rooms.aliases import LocalRankAliases, LocalRanks
 
 
-class  SendPublic(BaseEvent):
+class SendPublic(BaseEvent):
 
     @protected
     def __init__(self, socket: WebSocketServerProtocol, model: NewPublicModel, token: Optional[str]):
@@ -55,4 +53,3 @@ class  SendPublic(BaseEvent):
                 insert(public).values(data)
             )
             await db.commit()
-

@@ -119,9 +119,6 @@ class Auth(BaseEvent):
                     user[
                         LocalRankAliases.rank]
                 Cash.online[self.socket.id].token = token
-                print(Cash.online[self.socket.id].location_id)
-                print(Cash.online[self.socket.id].local_rank)
-                print(Cash.location)
 
                 await Successfully()(self.socket, model="успешная авторизация")
                 await NewToken()(self.socket, model=AuthModelOut(token=token))

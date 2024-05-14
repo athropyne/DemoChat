@@ -17,21 +17,4 @@ input_event_mapping = {
     "online room list": GetOnlineRoomList,
     "send public": SendPublic,
     "update permission": UpdatePermission
-
 }
-
-in_events = [
-    # Create("signup"),
-    # Auth("signin"),
-    # GetOneUser("get one user"),
-    # GetOnlineUserList("online list"),
-    # ChangeNick("change nickname"),
-    # Relocation("relocate"),
-    # CreateRoom("create room"),
-    # SendPublic("send public"),
-    # UpdatePermission("update permission")
-]
-
-out_events = [
-
-]

@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 @dataclass
 class PaginatorAliases:
-    SKIP = "пропустить"
-    LIMIT = "количество"
+    SKIP = "skip"
+    LIMIT = "limit"
 
 
 class Paginator(BaseModel):

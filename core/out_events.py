@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Type, List, Union, Set
+from typing import Optional, Union
 
 from pydantic import BaseModel
 from websockets import WebSocketServerProtocol
 
-from core.base_event import BaseEvent
 from core.io import IO_TYPE, OutputModel
 
 

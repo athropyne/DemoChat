@@ -1,6 +1,5 @@
 from typing import Optional
 
-from pydantic import BaseModel
 from sqlalchemy import CursorResult, insert, update, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -8,15 +7,13 @@ from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.exc import DuplicateError, InternalError, AccessDenied
+from core.exc import DuplicateError, AccessDenied
 from core.io import output
 from core.out_events import Successfully, OnlineRoomList
 from core.schemas import rooms, locations, local_ranks
 from core.security import protected
-from core.user_cash import online, User, Cash
+from core.user_cash import User, Cash
 from services.accounts.aliases import AccountAliases
-from services.accounts.events import Relocation
-from services.accounts.models import RelocationModel
 from services.models import Paginator
 from services.rooms.aliases import RoomAliases, LocalRankAliases, LocalRanks
 from services.rooms.models import CreateRoomModel, AddLocalPermissionModel, local_rank_level

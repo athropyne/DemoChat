@@ -38,6 +38,7 @@ class NotFoundError(InternalError):
     def __init__(self, data: Optional[IO_TYPE]):
         super().__init__("не найдено", data)
 
+
 class UpdateError(InternalError):
     def __init__(self, data: Optional[IO_TYPE]):
         super().__init__("не обновлено", data)

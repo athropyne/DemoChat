@@ -1,9 +1,6 @@
-from dataclasses import dataclass
 from typing import Optional, Dict, Set
 from uuid import UUID
 
-from pydantic import BaseModel
-from redis.asyncio import Redis
 from websockets import WebSocketServerProtocol
 
 from services.rooms.aliases import LocalRanks
@@ -11,13 +8,6 @@ from services.rooms.aliases import LocalRanks
 USER_ID = int
 ROOM_ID = int
 SOCKET_ID = UUID
-
-
-# @dataclass
-# class UserLink:
-#     socket: WebSocketServerProtocol
-#     ID: Optional[USER_ID] = None
-#     token: Optional[str] = None
 
 
 class User:
@@ -70,7 +60,6 @@ class Cash:
     online: Dict[SOCKET_ID, User] = {}
     ids: Dict[USER_ID, SOCKET_ID] = {}
     location: Dict[ROOM_ID, Set[SOCKET_ID]] = {}
-
 
 
 online: Dict[SOCKET_ID, User] = {}
