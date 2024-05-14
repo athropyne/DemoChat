@@ -17,7 +17,7 @@ class LocationShortInfoModel(BaseModel):
 
 class AddLocalPermissionModel(BaseModel):
     target_user_id: int = Field(alias=AccountAliases.ID)
-    rank: Optional[LocalRanks] = Field(alias=LocalRankAliases.rank)
+    rank: LocalRanks = Field(alias=LocalRankAliases.rank)
 
 
 class RemoveLocalPermissionModel(BaseModel):

@@ -62,8 +62,6 @@ class Cash:
     location: Dict[ROOM_ID, Set[SOCKET_ID]] = {}
 
 
-online: Dict[SOCKET_ID, User] = {}
-location: Dict[ROOM_ID, Set[SOCKET_ID]] = {}
 # class Storage:
 #
 #     async def __aenter__(self):

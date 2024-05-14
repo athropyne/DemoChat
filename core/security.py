@@ -4,7 +4,7 @@ from typing import Callable
 from pydantic import BaseModel
 from websockets import WebSocketServerProtocol
 
-from core.exc import NonAuthorized
+from events.exc import NonAuthorized
 from core.user_cash import Cash
 
 

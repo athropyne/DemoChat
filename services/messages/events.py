@@ -6,7 +6,7 @@ from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
 from core.database import engine
-from core.exc import AccessDenied
+from events.exc import AccessDenied
 from core.io import output
 from core.schemas import public
 from core.security import protected

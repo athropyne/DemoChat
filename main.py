@@ -7,10 +7,10 @@ from pydantic import ValidationError
 from websockets import WebSocketServerProtocol
 
 import core.database
-from core.exc import InternalError, NotFoundError
+from events.exc import InternalError, NotFoundError
 from core.io import InputModel, output
 from core.user_cash import User, Cash
-from events import input_event_mapping
+from events.inputs import input_event_mapping
 
 
 async def handler(websocket: WebSocketServerProtocol):

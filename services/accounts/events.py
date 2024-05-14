@@ -1,34 +1,29 @@
-import asyncio
 from typing import Optional
-from uuid import UUID
 
 from asyncpg import ForeignKeyViolationError, UniqueViolationError
-from pydantic import BaseModel
-from redis.asyncio import Redis
 from sqlalchemy import CursorResult, insert, select, update, RowMapping
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 from websockets import WebSocketServerProtocol
 
 from core.base_event import BaseEvent
-from core.config import TOKEN_EXPIRE
 from core.database import engine
-from core.exc import InternalError, DuplicateError, InvalidDataError, NotFoundError, UpdateError
+from events.exc import InternalError, DuplicateError, InvalidDataError, NotFoundError, UpdateError
 from core.managers import Token, PasswordManager
-from core.out_events import Successfully, OneUserInfo, OnlineUserListInfo, SystemMessage, NewToken
+from events.outputs import Successfully, OneUserInfo, OnlineUserListInfo, SystemMessage, NewToken
 from core.schemas import accounts, locations, local_ranks, rooms
 from core.security import protected
 from core.user_cash import Cash, User
 from services.accounts.aliases import AccountAliases, AccountStatuses
-from services.accounts.models import CreateModel, AuthModel, GetOneUserOut, GetOneUserModel, GetOnlineUserListModel, \
+from services.accounts.models import AuthModel, GetOneUserOut, GetOneUserModel, GetOnlineUserListModel, \
     ChangeNickModel, RelocationModel, ChangePasswordModel, AuthModelOut
-from services.messages.events import SendPublic
 from services.messages.models import PublicMessageOut, Author
 from services.rooms.aliases import RoomAliases, LocalRankAliases, LocalRanks
 from services.rooms.models import LocationShortInfoModel
 
 
 class Create(BaseEvent):
+    __doc__ = """ Регистрация нового пользователя """
     def __init__(self, socket: WebSocketServerProtocol, model: AuthModel, token=None):
         super().__init__(socket, model, token)
 
