@@ -56,9 +56,10 @@ async def handler(websocket: WebSocketServerProtocol):
                 await websocket.send(e())
         except websockets.exceptions.WebSocketException:
             user = Cash.online[websocket.id]
-            Cash.location[user.location_id].remove(user.socket.id)
-            if len(Cash.location[user.location_id]) == 0:
-                del Cash.location[user.location_id]
+            if user.location_id in Cash.location:
+                Cash.location[user.location_id].remove(user.socket.id)
+                if len(Cash.location[user.location_id]) == 0:
+                    del Cash.location[user.location_id]
             del Cash.ids[user.ID]
             del Cash.online[websocket.id]
             del user
